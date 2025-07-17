@@ -52,3 +52,22 @@ CREATE TABLE project_searchable_keys (
 
 
 Feel free to update this README as the project evolves.
+
+## Running CockroachDB with Docker Compose
+
+This project includes a `docker-compose.yml` file to run CockroachDB for development and testing.
+
+To start CockroachDB:
+
+```sh
+docker-compose up -d
+```
+
+- The database will be available on port 26257 (SQL) and 8080 (web UI).
+- Data is stored in a 500MB tmpfs volume for persistence during container runtime.
+
+To stop and remove the container:
+
+```sh
+docker-compose down
+```
