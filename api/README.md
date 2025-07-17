@@ -18,47 +18,9 @@ This project is a Go application for log analysis.
 
 ---
 
-### docker image tags
+
+### cockraoch docker image tag 
 cockroachdb/cockroach:latest-v23.2
-
-bitnami/zookeeper:latest
-
-bitnami/kafka:latest
-
-
-## Running CockroachDB with Docker Compose
-
-This project includes a `docker-compose.yml` file to run CockroachDB for development and testing.
-
-To start CockroachDB:
-
-```sh
-docker-compose up -d
-```
-
-- The database will be available on port 26257 (SQL) and 8080 (web UI).
-- Data is stored in a 500MB tmpfs volume for persistence during container runtime.
-
-## Running Kafka and Zookeeper
-
-    The configuration of Kafka is available in docker-compose file.
-
-  **Create the `logs` Topic:**
-    Once the container is running, you need to create the Kafka topic that the application will use.
-
-    ```sh
-    # Replace 'kafka-container-name' with your actual container name from 'docker ps'
-    docker exec -it kafka-container-name kafka-topics.sh --create --topic logs --bootstrap-server localhost:9092
-    ```
-
-      * The Kafka broker will be available on port `9092`.
-
-
-To stop and remove the container:
-
-```sh
-docker-compose down
-```
 
 
 
@@ -96,3 +58,38 @@ CREATE TABLE project_searchable_keys (
 );
 
 
+Feel free to update this README as the project evolves.
+
+## Running CockroachDB with Docker Compose
+
+This project includes a `docker-compose.yml` file to run CockroachDB for development and testing.
+
+To start CockroachDB:
+
+```sh
+docker-compose up -d
+```
+
+- The database will be available on port 26257 (SQL) and 8080 (web UI).
+- Data is stored in a 500MB tmpfs volume for persistence during container runtime.
+
+## Running Kafka and Zookeeper
+
+    The configuration of Kafka is available in docker-compose file.
+
+  **Create the `logs` Topic:**
+    Once the container is running, you need to create the Kafka topic that the application will use.
+
+    ```sh
+    # Replace 'kafka-container-name' with your actual container name from 'docker ps'
+    docker exec -it kafka-container-name kafka-topics.sh --create --topic logs --bootstrap-server localhost:9092
+    ```
+
+      * The Kafka broker will be available on port `9092`.
+
+
+To stop and remove the container:
+
+```sh
+docker-compose down
+```
