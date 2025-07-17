@@ -49,8 +49,9 @@ func main() {
 	r.HandleFunc("/", homeHandler)
 	r.HandleFunc("/login", loginHandler)
 	r.HandleFunc("/signup", signupHandler)
-	r.HandleFunc("/dashboard", dashboardHandler)
-	r.HandleFunc("/dashboard/{projectID}", projectHandler)
+	// Use strict match for /dashboard and a subrouter for /dashboard/{projectID}
+	r.HandleFunc("/dashboard", dashboardHandler).Methods("GET")
+	r.HandleFunc("/dashboard/{projectID}", projectHandler).Methods("GET")
 	r.HandleFunc("/projects/create", createProjectHandler)
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
@@ -188,6 +189,7 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("dashboardHandler: error scanning project row: %v", err)
 			continue
 		}
+		log.Printf("dashboardHandler: project id: %s", id)
 		projects = append(projects, map[string]interface{}{
 			"ID":            id,
 			"Name":          name,
