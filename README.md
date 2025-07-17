@@ -26,7 +26,7 @@ cockroachdb/cockroach:latest-v23.2
 
 ###Cockrocach DB models
 
-
+```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username STRING UNIQUE NOT NULL,
@@ -49,8 +49,6 @@ CREATE TABLE project_searchable_keys (
     key_name STRING NOT NULL,
     PRIMARY KEY (project_id, key_name)
 );
-
-
 
 
 Feel free to update this README as the project evolves.
