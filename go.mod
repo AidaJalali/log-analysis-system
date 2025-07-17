@@ -7,4 +7,7 @@ require (
 	golang.org/x/crypto v0.22.0
 )
 
-require github.com/yuin/goldmark v1.7.1 // indirect
+require (
+	github.com/gorilla/mux v1.8.1 // indirect
+	github.com/yuin/goldmark v1.7.1 // indirect
+)
