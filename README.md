@@ -26,6 +26,13 @@ cockroachdb/cockroach:latest-v23.2
 
 ###Cockrocach DB models
 
+commands:
+
+cockroach sql --insecure
+
+create database log;
+use log;
+
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
