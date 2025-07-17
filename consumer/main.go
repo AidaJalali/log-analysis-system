@@ -15,7 +15,7 @@ func main(){
 		log.Fatalf("Could not load config in consumer: %v",err)
 	}
 
-	clickhouseClient, err := database.NewClickHouseClient(cfg.ClickHouse)
+	clickhouseClient, err := database.NewClickHouseClient(cfg.Clickhouse)
 	if err != nil {
 		log.Fatalf("Could not connect to ClickHouse: %v", err)
 	}

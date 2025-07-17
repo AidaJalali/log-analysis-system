@@ -108,4 +108,9 @@ docker-compose down
 ```
 
 ```
+
+Don't forget to run these commands
+
+go get "github.com/ClickHouse/clickhouse-go/v2"
+go get "github.com/gocql/gocql"
 ```
