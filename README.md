@@ -23,4 +23,34 @@ This project is a Go application for log analysis.
 cockroachdb/cockroach:latest-v23.2
 
 
+
+###Cockrocach DB models
+
+
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username STRING UNIQUE NOT NULL,
+    password_hash STRING NOT NULL
+);
+CREATE TABLE projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name STRING NOT NULL,
+    api_key STRING UNIQUE NOT NULL,
+    log_ttl_seconds INT NOT NULL,
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE user_projects (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, project_id)
+);
+CREATE TABLE project_searchable_keys (
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    key_name STRING NOT NULL,
+    PRIMARY KEY (project_id, key_name)
+);
+
+
+
+
 Feel free to update this README as the project evolves.
