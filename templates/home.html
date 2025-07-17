@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log Analysis System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <header class="bg-gray-800 text-white px-8 py-4 flex justify-between items-center">
+        <div class="font-bold text-lg">Log Analysis System</div>
+        <div class="space-x-4">
+            <button onclick="location.href='/login'" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">Login</button>
+            <button onclick="location.href='/signup'" class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded">Sign Up</button>
+        </div>
+    </header>
+    <main class="max-w-2xl mx-auto bg-white mt-8 p-8 rounded-lg shadow">
+        <h1 class="text-2xl font-semibold mb-6">Welcome to the Log Analysis System</h1>
+        <section id="readme-content" class="prose max-w-none">
+            {{.ReadmeHTML}}
+        </section>
+        <div class="mt-8 space-x-4">
+            <button onclick="location.href='/login'" class="bg-green-600 hover:bg-green-700 px-6 py-2 rounded text-white">Login</button>
+            <button onclick="location.href='/signup'" class="bg-cyan-600 hover:bg-cyan-700 px-6 py-2 rounded text-white">Sign Up</button>
+        </div>
+    </main>
+</body>
+</html>
