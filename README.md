@@ -23,7 +23,9 @@ cockroachdb/cockroach:latest-v23.2
 
 bitnami/zookeeper:latest
 
-bitnami/kafka:latest
+bitnami/kafka:3.8.0
+
+cassandra:4.1.6 
 
 
 ## Running CockroachDB with Docker Compose
@@ -52,6 +54,10 @@ docker-compose up -d
     ```
 
       * The Kafka broker will be available on port `9092`.
+
+
+## Running Cassandra
+
 
 
 To stop and remove the container:
