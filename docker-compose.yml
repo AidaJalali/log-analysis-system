@@ -21,9 +21,13 @@ services:
     depends_on:
       - zookeeper
     environment:
+      # --- Existing variables ---
       - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
       - ALLOW_PLAINTEXT_LISTENER=yes
+      # --- Add these two required variables ---
+      - KAFKA_CFG_PROCESS_ROLES=broker  # Tells Kafka to run as a broker and use Zookeeper
+      - KAFKA_CFG_NODE_ID=1             # Gives the broker a unique ID
 
 volumes:
   cockroach-data:
