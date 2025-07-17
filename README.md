@@ -1,104 +1,111 @@
-# Log Analysis System
+# Log Analysis System 
 
-This project is a Go application for log analysis.
-
-## Getting Started
-
-**Run the application:**
-   ```sh
-   go run main.go
-   ```
-
-## Project Structure
-- `go.mod` - Go module definition
-- `main.go` - Application entry point (to be created)
+This project is a Go application for real-time log analysis, using Kafka for message queuing, Cassandra for log storage, and CockroachDB for metadata.
 
 ## Requirements
-- Go 1.18 or newer
 
----
+* Go `1.18` or newer
+* Docker and Docker Compose
 
-### docker image tags
-cockroachdb/cockroach:latest-v23.2
+## Setup & Running the System
 
-bitnami/zookeeper:latest
+This project uses a `docker-compose.yml` file to run all required services. The file is configured with the following service versions:
 
-bitnami/kafka:3.8.0
+* **CockroachDB**: `latest-v23.2`
+* **ZooKeeper**: `3.9.2`
+* **Kafka**: `3.8.0`
+* **Cassandra**: `4.1.6`
 
-cassandra:4.1.6 
+**1. Start all services:**
 
-
-## Running CockroachDB with Docker Compose
-
-This project includes a `docker-compose.yml` file to run CockroachDB for development and testing.
-
-To start CockroachDB:
-
+Run the following command from the root of the project:
 ```sh
 docker-compose up -d
+````
+
+**2. Create the Kafka `logs` Topic:**
+
+Once the containers are running, execute the command below to create the necessary Kafka topic.
+
+```sh
+docker exec -it kafka kafka-topics.sh --create --topic logs --bootstrap-server localhost:9092
 ```
 
-- The database will be available on port 26257 (SQL) and 8080 (web UI).
-- Data is stored in a 500MB tmpfs volume for persistence during container runtime.
+**3. Run the Go Application:**
 
-## Running Kafka and Zookeeper
+```sh
+go run main.go
+```
 
-    The configuration of Kafka is available in docker-compose file.
+-----
 
-  **Create the `logs` Topic:**
-    Once the container is running, you need to create the Kafka topic that the application will use.
+## Service Endpoints
 
+  * **CockroachDB UI**: `http://localhost:8080`
+  * **CockroachDB SQL**: `localhost:26257`
+  * **Kafka Broker**: `localhost:9092`
+  * **Cassandra CQLSH**: `localhost:9042`
+
+-----
+
+## Database Schemas & Setup
+
+### CockroachDB Setup
+
+1.  Connect to the database:
     ```sh
-    # Replace 'kafka-container-name' with your actual container name from 'docker ps'
-    docker exec -it kafka-container-name kafka-topics.sh --create --topic logs --bootstrap-server localhost:9092
+    cockroach sql --insecure --host=localhost:26257
+    ```
+2.  Create the database and tables:
+    ```sql
+    CREATE DATABASE log;
+    USE log;
+
+    CREATE TABLE users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        username STRING UNIQUE NOT NULL,
+        password_hash STRING NOT NULL
+    );
+
+    CREATE TABLE projects (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name STRING NOT NULL,
+        api_key STRING UNIQUE NOT NULL,
+        log_ttl_seconds INT NOT NULL,
+        owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+    );
     ```
 
-      * The Kafka broker will be available on port `9092`.
+### Cassandra Setup
 
+1.  Connect to the Cassandra container:
+    ```sh
+    docker exec -it cassandra cqlsh
+    ```
+2.  Create the keyspace and tables for storing logs (example):
+    ```sql
+    CREATE KEYSPACE log_data WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
 
-## Running Cassandra
+    USE log_data;
 
+    CREATE TABLE logs (
+        project_id uuid,
+        timestamp timeuuid,
+        level text,
+        message text,
+        PRIMARY KEY (project_id, timestamp)
+    ) WITH CLUSTERING ORDER BY (timestamp DESC);
+    ```
 
+-----
 
-To stop and remove the container:
+## Stopping the System
+
+To stop and remove all containers, networks, and volumes:
 
 ```sh
 docker-compose down
 ```
 
-
-
-###Cockrocach DB models
-
-commands:
-
-cockroach sql --insecure
-
-create database log;
-use log;
-
-```sql
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username STRING UNIQUE NOT NULL,
-    password_hash STRING NOT NULL
-);
-CREATE TABLE projects (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name STRING NOT NULL,
-    api_key STRING UNIQUE NOT NULL,
-    log_ttl_seconds INT NOT NULL,
-    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
-);
-CREATE TABLE user_projects (
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, project_id)
-);
-CREATE TABLE project_searchable_keys (
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    key_name STRING NOT NULL,
-    PRIMARY KEY (project_id, key_name)
-);
-
-
+```
+```
