@@ -62,6 +62,25 @@
         {{else}}
         <div class="mt-8">
             <h2 class="text-xl font-semibold mb-4">Logs</h2>
+
+            <!-- Search bar -->
+            <div class="mb-4 flex items-center space-x-2">
+                <input
+                    id="search-input"
+                    type="text"
+                    placeholder="Search event name..."
+                    class="border px-3 py-2 rounded flex-grow"
+                />
+                <button
+                    id="search-button"
+                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
+                >Search</button>
+                <button
+                    id="clear-search-button"
+                    class="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded"
+                >Clear</button>
+            </div>
+
             <table id="logs-table" class="min-w-full bg-white border rounded shadow">
                 <thead>
                     <tr>
@@ -86,7 +105,6 @@
 
     <script>
         function sendTestLog(projectId, apiKey) {
-            // 1. Define a sample log payload
             const testLog = {
                 "event_name": "TestFromWebApp",
                 "payload": {
@@ -94,8 +112,6 @@
                     "message": "This is a test log sent from the project details page at " + new Date().toISOString()
                 }
             };
-
-            // 2. Send the request using the Fetch API
             fetch(`/api/projects/${projectId}/logs`, {
                 method: 'POST',
                 headers: {
@@ -105,7 +121,7 @@
                 body: JSON.stringify(testLog)
             })
             .then(response => {
-                if (response.status === 202) { // 202 Accepted
+                if (response.status === 202) {
                     alert('Test log sent successfully!');
                 } else {
                     alert(`Failed to send log. Server responded with status: ${response.status}`);
@@ -120,14 +136,27 @@
 
     <script>
         const projectId = "{{.ProjectID}}";
+        let currentSearchTerm = "";
+
         function fetchLogs() {
-            fetch(`/api/projects/${projectId}/logs`)
+            // build URL with optional search query
+            let url = `/api/projects/${projectId}/logs`;
+            if (currentSearchTerm) {
+                url += `?search=${encodeURIComponent(currentSearchTerm)}`;
+            }
+
+            fetch(url)
                 .then(resp => resp.json())
                 .then(logs => {
                     const tbody = document.getElementById('logs-tbody');
                     tbody.innerHTML = '';
                     if (logs.length === 0) {
-                        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-gray-400 py-4">No logs found for this project.</td></tr>`;
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="4" class="text-center text-gray-400 py-4">
+                                    No logs found for this project.
+                                </td>
+                            </tr>`;
                         return;
                     }
                     logs.forEach(log => {
@@ -137,19 +166,51 @@
                             <td class="px-4 py-2 border-b">${log.event_name}</td>
                             <td class="px-4 py-2 border-b">${new Date(log.timestamp * 1000).toLocaleString()}</td>
                             <td class="px-4 py-2 border-b">
-                                <a href="/projects/${projectId}/logs/${log.log_id}" class="bg-blue-500 hover:bg-blue-700 text-white px-3 py-1 rounded">View Details</a>
-                            </td>
-                        `;
+                                <a href="/projects/${projectId}/logs/${log.log_id}"
+                                   class="bg-blue-500 hover:bg-blue-700 text-white px-3 py-1 rounded">
+                                    View Details
+                                </a>
+                            </td>`;
                         tbody.appendChild(tr);
                     });
                 })
                 .catch(() => {
                     const tbody = document.getElementById('logs-tbody');
-                    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-gray-400 py-4">Failed to load logs.</td></tr>`;
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="text-center text-gray-400 py-4">
+                                Failed to load logs.
+                            </td>
+                        </tr>`;
                 });
         }
+
+        // initial load + polling
         fetchLogs();
-        setInterval(fetchLogs, 3000); // Poll every 3 seconds
+        setInterval(fetchLogs, 3000);
+
+        // wire up search UI
+        document.getElementById('search-button')
+            .addEventListener('click', () => {
+                currentSearchTerm = document.getElementById('search-input').value.trim();
+                fetchLogs();
+            });
+
+        document.getElementById('clear-search-button')
+            .addEventListener('click', () => {
+                document.getElementById('search-input').value = "";
+                currentSearchTerm = "";
+                fetchLogs();
+            });
+
+        document.getElementById('search-input')
+            .addEventListener('keypress', e => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    currentSearchTerm = e.target.value.trim();
+                    fetchLogs();
+                }
+            });
     </script>
 </body>
 </html>

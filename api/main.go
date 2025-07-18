@@ -555,14 +555,45 @@ func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
 	projectID := vars["projectID"]
 	ctx := context.Background()
 
-	query := `SELECT log_id, event_name, timestamp FROM logs_index WHERE project_id = ? ORDER BY timestamp DESC LIMIT 100`
-	rows, err := clickhouseConn.Query(ctx, query, projectID)
+	// 1) Grab the raw search term
+	search := strings.TrimSpace(r.URL.Query().Get("search"))
+
+	// 2) Build query + args with ClickHouse‐native ILIKE
+	var (
+		query string
+		args  []interface{}
+	)
+	if search != "" {
+		query = `
+          SELECT log_id, event_name, timestamp
+          FROM logs_index
+          WHERE project_id = ?
+            AND event_name ILIKE ?
+          ORDER BY timestamp DESC
+          LIMIT 100
+        `
+		// Use case‐insensitive LIKE
+		args = []interface{}{projectID, "%" + search + "%"}
+	} else {
+		query = `
+          SELECT log_id, event_name, timestamp
+          FROM logs_index
+          WHERE project_id = ?
+          ORDER BY timestamp DESC
+          LIMIT 100
+        `
+		args = []interface{}{projectID}
+	}
+
+	// 3) Run it
+	rows, err := clickhouseConn.Query(ctx, query, args...)
 	if err != nil {
 		http.Error(w, "Failed to query ClickHouse", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
+	// 4) Map into Go structs
 	logs := []ClickHouseLog{}
 	for rows.Next() {
 		var l ClickHouseLog
@@ -571,7 +602,12 @@ func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		logs = append(logs, l)
 	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Error reading rows", http.StatusInternalServerError)
+		return
+	}
 
+	// 5) Encode JSON
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(logs)
 }
