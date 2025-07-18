@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/yuin/goldmark"
 	"golang.org/x/crypto/bcrypt"
+	_"github.com/lib/pq"
 )
 
 var db *sql.DB

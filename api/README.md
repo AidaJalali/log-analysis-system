@@ -27,7 +27,7 @@ cockroachdb/cockroach:latest-v23.2
 ###Cockrocach DB models
 
 commands:
-
+docker exec -it bb4e807cc011 cockroach sql --insecure
 cockroach sql --insecure
 
 create database log;
