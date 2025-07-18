@@ -3,24 +3,21 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
-
-	"database/sql"
-
-	"crypto/rand"
-	"encoding/hex"
+	"os/exec"
 	"strings"
 
-	"log"
-
-	"encoding/json"
-	"io/ioutil"
-	"os/exec"
-
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/gocql/gocql"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 	"github.com/segmentio/kafka-go"
@@ -28,8 +25,28 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Global variables
 var db *sql.DB
+var kafkaWriter *kafka.Writer
+var clickhouseConn clickhouse.Conn
+var cassandraSession *gocql.Session
 
+// Structs
+type ClickHouseLog struct {
+	LogID     string `json:"log_id"`
+	EventName string `json:"event_name"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type CassandraLog struct {
+	ProjectID string            `json:"project_id"`
+	LogID     string            `json:"log_id"`
+	EventName string            `json:"event_name"`
+	Timestamp int64             `json:"timestamp"`
+	Payload   map[string]string `json:"payload"`
+}
+
+// Database initialization functions
 func initDB() error {
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
@@ -45,8 +62,6 @@ func initDB() error {
 	return db.Ping()
 }
 
-var kafkaWriter *kafka.Writer
-
 func initKafka() error {
 	kafkaBrokers := os.Getenv("KAFKA_BROKERS")
 	if kafkaBrokers == "" {
@@ -60,9 +75,6 @@ func initKafka() error {
 	}
 	return nil
 }
-
-// ClickHouse client struct for API
-var clickhouseConn clickhouse.Conn
 
 func initClickHouse() error {
 	// These values should ideally come from environment variables or config
@@ -97,8 +109,37 @@ func initClickHouse() error {
 	return nil
 }
 
-func main() {
+func initCassandra() error {
+	hosts := os.Getenv("CASSANDRA_HOSTS")
+	if hosts == "" {
+		return fmt.Errorf("CASSANDRA_HOSTS environment variable not set")
+	}
+	keyspace := os.Getenv("CASSANDRA_KEYSPACE")
+	if keyspace == "" {
+		return fmt.Errorf("CASSANDRA_KEYSPACE environment variable not set")
+	}
+	username := os.Getenv("CASSANDRA_USER")
+	password := os.Getenv("CASSANDRA_PASSWORD")
 
+	cluster := gocql.NewCluster(strings.Split(hosts, ",")...)
+	cluster.Keyspace = keyspace
+	cluster.Consistency = gocql.Quorum
+	if username != "" || password != "" {
+		cluster.Authenticator = gocql.PasswordAuthenticator{
+			Username: username,
+			Password: password,
+		}
+	}
+	session, err := cluster.CreateSession()
+	if err != nil {
+		return err
+	}
+	cassandraSession = session
+	return nil
+}
+
+// Main function
+func main() {
 	if err := initDB(); err != nil {
 		panic("Failed to connect to database: " + err.Error())
 	}
@@ -115,6 +156,11 @@ func main() {
 	}
 	fmt.Println("Connected to ClickHouse successfully!")
 
+	if err := initCassandra(); err != nil {
+		panic("Failed to connect to Cassandra: " + err.Error())
+	}
+	fmt.Println("Connected to Cassandra successfully!")
+
 	r := mux.NewRouter()
 	r.HandleFunc("/", homeHandler)
 	r.HandleFunc("/login", loginHandler)
@@ -126,6 +172,8 @@ func main() {
 	r.HandleFunc("/api/projects/{projectID}/logs", apiLogHandler).Methods("POST")
 	r.HandleFunc("/api/projects/{projectID}/logs", apiProjectLogsHandler).Methods("GET")
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+	r.HandleFunc("/api/projects/{projectID}/logs/{logID}", apiProjectLogDetailHandler).Methods("GET")
+	r.HandleFunc("/projects/{projectID}/logs/{logID}", logDetailsPageHandler).Methods("GET")
 
 	port := ":8080"
 	fmt.Printf("Server starting at http://localhost%s ...", port)
@@ -133,9 +181,9 @@ func main() {
 	if err != nil {
 		fmt.Printf("server failed:%s", err)
 	}
-
 }
 
+// Web page handlers
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	readmeContent, err := os.ReadFile("README.md")
 	if err != nil {
@@ -440,7 +488,12 @@ func createProjectHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 
-// API handler for log ingestion
+func logDetailsPageHandler(w http.ResponseWriter, r *http.Request) {
+	tmpl := template.Must(template.ParseFiles("templates/log_details.html"))
+	tmpl.Execute(w, nil)
+}
+
+// API handlers
 func apiLogHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectID := vars["projectID"]
@@ -497,15 +550,6 @@ func apiLogHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"accepted"}`))
 }
 
-// Add struct for log response
-
-type ClickHouseLog struct {
-	LogID     string `json:"log_id"`
-	EventName string `json:"event_name"`
-	Timestamp int64  `json:"timestamp"`
-}
-
-// Handler to fetch logs from ClickHouse
 func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectID := vars["projectID"]
@@ -530,4 +574,33 @@ func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(logs)
+}
+
+func apiProjectLogDetailHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectID := vars["projectID"]
+	logID := vars["logID"]
+
+	if cassandraSession == nil {
+		http.Error(w, "Cassandra not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	var logData CassandraLog
+	query := `SELECT project_id, log_id, event_name, timestamp, payload FROM logs WHERE project_id = ? AND log_id = ? LIMIT 1`
+	m := map[string]string{}
+	err := cassandraSession.Query(query, projectID, logID).Consistency(gocql.One).Scan(
+		&logData.ProjectID,
+		&logData.LogID,
+		&logData.EventName,
+		&logData.Timestamp,
+		&m,
+	)
+	if err != nil {
+		http.Error(w, "Log not found", http.StatusNotFound)
+		return
+	}
+	logData.Payload = m
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logData)
 }

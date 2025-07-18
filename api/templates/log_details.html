@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log Details - Log Analysis System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <header class="bg-gray-800 text-white px-8 py-4 flex justify-between items-center">
+        <div class="font-bold text-lg">Log Analysis System</div>
+        <div>
+            <a href="/dashboard" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">Back to Dashboard</a>
+        </div>
+    </header>
+    <main class="max-w-2xl mx-auto bg-white mt-8 p-8 rounded-lg shadow">
+        <h1 class="text-2xl font-semibold mb-4">Log Details</h1>
+        <div id="log-details">
+            <div class="text-center text-gray-500">Loading log details...</div>
+        </div>
+        <div class="mt-8">
+            <a id="back-link" href="#" class="text-blue-600 hover:underline">&larr; Back to Project</a>
+        </div>
+    </main>
+    <script>
+        // Extract projectID and logID from URL
+        const pathParts = window.location.pathname.split('/');
+        const projectId = pathParts[2];
+        const logId = pathParts[4];
+        document.getElementById('back-link').href = `/dashboard/${projectId}`;
+
+        fetch(`/api/projects/${projectId}/logs/${logId}`)
+            .then(resp => {
+                if (!resp.ok) throw new Error('Log not found');
+                return resp.json();
+            })
+            .then(log => {
+                let html = `
+                    <div class="mb-4"><span class="font-bold">Project ID:</span> <span class="font-mono">${log.project_id}</span></div>
+                    <div class="mb-4"><span class="font-bold">Log ID:</span> <span class="font-mono">${log.log_id}</span></div>
+                    <div class="mb-4"><span class="font-bold">Event Name:</span> ${log.event_name}</div>
+                    <div class="mb-4"><span class="font-bold">Timestamp:</span> ${new Date(log.timestamp * 1000).toLocaleString()}</div>
+                    <div class="mb-4">
+                        <span class="font-bold">Payload:</span>
+                        <table class="min-w-full bg-white border rounded mt-2">
+                            <thead><tr><th class="px-4 py-2 border-b">Key</th><th class="px-4 py-2 border-b">Value</th></tr></thead>
+                            <tbody>
+                `;
+                for (const [key, value] of Object.entries(log.payload || {})) {
+                    html += `<tr><td class="px-4 py-2 border-b font-mono text-xs">${key}</td><td class="px-4 py-2 border-b font-mono text-xs">${value}</td></tr>`;
+                }
+                html += `</tbody></table></div>`;
+                document.getElementById('log-details').innerHTML = html;
+            })
+            .catch(() => {
+                document.getElementById('log-details').innerHTML = '<div class="text-red-500">Log not found or failed to load.</div>';
+            });
+    </script>
+</body>
+</html>
