@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"bytes"
 	"fmt"
 	"html/template"
@@ -22,6 +23,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/yuin/goldmark"
 	"golang.org/x/crypto/bcrypt"
+	"github.com/segmentio/kafka-go"
 	_"github.com/lib/pq"
 )
 
@@ -42,12 +44,36 @@ func initDB() error {
 	return db.Ping()
 }
 
+var kafkaWriter *kafka.Writer 
+
+func initKafka() error {
+	kafkaBrokers := os.Getenv("KAFKA_BROKERS")
+	if kafkaBrokers == "" {
+		return fmt.Errorf("KAFKA_BROKERS environment variable not set")
+	}
+
+	kafkaWriter = &kafka.Writer{
+		Addr:     kafka.TCP(strings.Split(kafkaBrokers, ",")...),
+		Topic:    "logs",
+		Balancer: &kafka.LeastBytes{},
+	}
+	return nil
+}
+
+
+
 func main() {
 
 	if err := initDB(); err != nil {
 		panic("Failed to connect to database: " + err.Error())
 	}
 	fmt.Println("Connected to database successfully!")
+
+
+	if err := initKafka(); err != nil {
+		panic("Failed to connect to Kafka: " + err.Error())
+	}
+	fmt.Println("Connected to Kafka successfully!")
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", homeHandler)
@@ -64,7 +90,7 @@ func main() {
 	fmt.Printf("Server starting at http://localhost%s ...", port)
 	err := http.ListenAndServe(port, r)
 	if err != nil {
-		fmt.Printf("server failed", err)
+		fmt.Printf("server failed:%s", err)
 	}
 
 }
@@ -378,42 +404,54 @@ func apiLogHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectID := vars["projectID"]
 	apiKey := r.Header.Get("X-API-KEY")
+
 	if apiKey == "" {
 		http.Error(w, "Missing API key", http.StatusUnauthorized)
 		return
 	}
-	// Validate API key for project
+
+	// Validate API key against the database
 	var dbApiKey string
 	err := db.QueryRow(`SELECT api_key FROM projects WHERE id = $1`, projectID).Scan(&dbApiKey)
 	if err != nil || dbApiKey != apiKey {
 		http.Error(w, "Invalid API key or project", http.StatusUnauthorized)
 		return
 	}
-	// Parse log JSON
-	type LogPayload struct {
-		EventName string                 `json:"event_name"`
-		Timestamp int64                  `json:"timestamp"`
-		Payload   map[string]interface{} `json:"payload"`
-	}
-	var logPayload LogPayload
-	if err := json.NewDecoder(r.Body).Decode(&logPayload); err != nil {
+
+	// Decode the incoming JSON from the request body
+	var incomingLog map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&incomingLog); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	payloadBytes, err := json.Marshal(logPayload.Payload)
+
+	// Prepare the final message for Kafka, adding the projectID
+	messageForKafka := map[string]interface{}{
+		"project_id": projectID,
+		"payload":    incomingLog,
+	}
+
+	// Convert the map to a JSON byte array
+	messageBytes, err := json.Marshal(messageForKafka)
 	if err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		http.Error(w, "Failed to serialize log message", http.StatusInternalServerError)
 		return
 	}
-	_, err = db.Exec(
-		`INSERT INTO logs (project_id, event_name, timestamp, payload) VALUES ($1, $2, $3, $4)`,
-		projectID, logPayload.EventName, logPayload.Timestamp, string(payloadBytes),
+
+	// Write the message to the Kafka topic
+	err = kafkaWriter.WriteMessages(context.Background(),
+		kafka.Message{
+			Value: messageBytes,
+		},
 	)
+
 	if err != nil {
-		log.Printf("apiLogHandler: error inserting log: %v", err)
-		http.Error(w, "Failed to insert log", http.StatusInternalServerError)
+		log.Printf("apiLogHandler: error writing to kafka: %v", err)
+		http.Error(w, "Failed to submit log", http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"status":"ok"}`))
+
+	// Respond with 202 Accepted
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status":"accepted"}`))
 }
