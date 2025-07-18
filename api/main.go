@@ -555,10 +555,8 @@ func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
 	projectID := vars["projectID"]
 	ctx := context.Background()
 
-	// 1) Grab the raw search term
 	search := strings.TrimSpace(r.URL.Query().Get("search"))
 
-	// 2) Build query + args with ClickHouse‐native ILIKE
 	var (
 		query string
 		args  []interface{}
@@ -572,7 +570,6 @@ func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
           ORDER BY timestamp DESC
           LIMIT 100
         `
-		// Use case‐insensitive LIKE
 		args = []interface{}{projectID, "%" + search + "%"}
 	} else {
 		query = `
@@ -585,7 +582,6 @@ func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
 		args = []interface{}{projectID}
 	}
 
-	// 3) Run it
 	rows, err := clickhouseConn.Query(ctx, query, args...)
 	if err != nil {
 		http.Error(w, "Failed to query ClickHouse", http.StatusInternalServerError)
@@ -593,7 +589,6 @@ func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	// 4) Map into Go structs
 	logs := []ClickHouseLog{}
 	for rows.Next() {
 		var l ClickHouseLog
@@ -607,7 +602,6 @@ func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5) Encode JSON
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(logs)
 }
