@@ -23,6 +23,7 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL driver for CockroachDB
 	"github.com/yuin/goldmark"
 	"golang.org/x/crypto/bcrypt"
+	_"github.com/lib/pq"
 )
 
 var db *sql.DB
