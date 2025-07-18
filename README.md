@@ -70,6 +70,9 @@ go run main.go
   * **Cassandra CQL**: `localhost:9042`
   * **ClickHouse HTTP**: `http://localhost:8123`
   * **ClickHouse Native**: `localhost:9000`
+-----
+
+## Required Env Variables
   * **KAFKA_TOPIC**: `logs`
   * **CLICKHOUSE_HOST**: `localhost`
   * **CLICKHOUSE_PORT**: `9000`
