@@ -55,7 +55,7 @@ func (c *CassandraClient) WriteLog(...): This declares a method named WriteLog. 
 
 func (c *ClickhouseClient) WriteLog(logData LogIndex) error {
 	ctx := context.Background()
-	err := c.Conn.Exec(ctx, `INSERT INTO logs_index (project_id, log_id, event_name, timestamp, searchable_key) VALUES (?, ?, ?, ?, ?)`,
+	err := c.Conn.Exec(ctx, `INSERT INTO logs_index (project_id, log_id, event_name, timestamp, searchable_key_1) VALUES (?, ?, ?, ?, ?)`,
 		logData.ProjectID,
 		logData.LogID,
 		logData.EventName,

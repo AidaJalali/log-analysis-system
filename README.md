@@ -111,7 +111,7 @@ go run main.go
     ```sql
     CREATE DATABASE IF NOT EXISTS log_data;
 
-    CREATE TABLE log_data.logs_index (
+    CREATE TABLE logs_index (
         project_id UUID,
         log_id UUID,
         event_name String,
@@ -130,12 +130,15 @@ go run main.go
     ```
 2.  Create the keyspace and table:
     ```sql
-    CREATE KEYSPACE log_data WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+    CREATE KEYSPACE log_system WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+
+    USE log_system;
 
     CREATE TABLE logs (
     project_id uuid,
     log_id uuid,
     event_name text,
+    timestamp timestamp
     payload map<text, timestamp>,
     PRIMARY KEY (project_id, log_id)
     );

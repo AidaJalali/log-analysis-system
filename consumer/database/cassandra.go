@@ -42,6 +42,8 @@ func NewCassandraClient(cfg config.CassandraConfig)(*CassandraClient,error){
 }
 
 func (c *CassandraClient) WriteLog(logData LogPayload) error {
+
+	log.Printf("DEBUG: Writing to Cassandra. Data: %+v, Timestamp Type: %T", logData, logData.Timestamp)
 	err := c.Session.Query(`
 		INSERT INTO logs (project_id, log_id, event_name, timestamp, payload) VALUES (?, ?, ?, ?, ?)
 	`,

@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -12,16 +13,19 @@ import (
 	"log-analysis-system/consumer/database"
 )
 
-// IngestedLog is the structure of the log message as it comes from Kafka.
+type KafkaMessage struct {
+	ProjectID string      `json:"project_id"`
+	Payload   IngestedLog `json:"payload"`
+}
+
 type IngestedLog struct {
-	ProjectID string            `json:"project_id"`
-	EventName string            `json:"event_name"`
-	Payload   map[string]string `json:"payload"`
+	EventName string                 `json:"event_name"`
+	Payload   map[string]interface{} `json:"payload"`
 }
 
 type Consumer struct {
 	reader          *kafka.Reader
-	chClient        *database.ClickhouseClient
+	clickhouseClient *database.ClickhouseClient
 	cassandraClient *database.CassandraClient
 }
 
@@ -33,7 +37,7 @@ func NewConsumer(cfg config.KafkaConfig, ch *database.ClickhouseClient, cass *da
 	})
 	return &Consumer{
 		reader:          reader,
-		chClient:        ch,
+		clickhouseClient: ch,
 		cassandraClient: cass,
 	}
 }
@@ -44,47 +48,62 @@ func (c *Consumer) Start() {
 	for {
 		msg, err := c.reader.ReadMessage(context.Background())
 		if err != nil {
-			log.Printf("ERROR: could not read message: %v", err)
+			log.Printf("ERROR: could not read message from kafka: %v", err)
 			continue
 		}
 
-		var ingestedLog IngestedLog
-		if err := json.Unmarshal(msg.Value, &ingestedLog); err != nil {
-			log.Printf("ERROR: could not unmarshal message: %v", err)
+		var kafkaMsg KafkaMessage
+		if err := json.Unmarshal(msg.Value, &kafkaMsg); err != nil {
+			log.Printf("ERROR: could not unmarshal kafka message: %v", err)
 			continue
 		}
 
-		// Generate a unique ID and timestamp for this log event
+		projectID := kafkaMsg.ProjectID
+		ingestedLog := kafkaMsg.Payload
+
 		logID := uuid.NewString()
 		timestamp := time.Now().Unix()
 
-		// Fan out to databases
-		go c.writeToCassandra(ingestedLog, logID, timestamp)
-		go c.writeToClickHouse(ingestedLog, logID, timestamp)
+		go c.writeToCassandra(projectID, ingestedLog, logID, timestamp)
+		go c.writeToClickHouse(projectID, ingestedLog, logID, timestamp)
 	}
 }
 
-func (c *Consumer) writeToCassandra(logData IngestedLog, logID string, ts int64) {
+func (c *Consumer) writeToCassandra(projectID string, logData IngestedLog, logID string, ts int64) {
 	payload := database.LogPayload{
-		ProjectID: logData.ProjectID,
+		ProjectID: projectID,
 		LogID:     logID,
 		EventName: logData.EventName,
 		Timestamp: ts,
-		Payload:   logData.Payload,
+		Payload:   convertPayload(logData.Payload),
 	}
 	if err := c.cassandraClient.WriteLog(payload); err != nil {
 		log.Printf("ERROR: could not write to Cassandra: %v", err)
 	}
 }
 
-func (c *Consumer) writeToClickHouse(logData IngestedLog, logID string, ts int64) {
-	index := database.LogIndex{
-		ProjectID: logData.ProjectID,
-		LogID:     logID,
-		EventName: logData.EventName,
-		Timestamp: ts,
+func (c *Consumer) writeToClickHouse(projectID string, logData IngestedLog, logID string, ts int64) {
+	var searchableKey string
+	if key, ok := logData.Payload["searchable_key_1"].(string); ok {
+		searchableKey = key
 	}
-	if err := c.chClient.WriteLog(index); err != nil {
+
+	index := database.LogIndex{
+		ProjectID:    projectID,
+		LogID:        logID,
+		EventName:    logData.EventName,
+		Timestamp:    ts,
+		SearchableKey: searchableKey,
+	}
+	if err := c.clickhouseClient.WriteLog(index); err != nil {
 		log.Printf("ERROR: could not write to ClickHouse: %v", err)
 	}
+}
+
+func convertPayload(payload map[string]interface{}) map[string]string {
+	stringPayload := make(map[string]string)
+	for key, value := range payload {
+		stringPayload[key] = fmt.Sprintf("%v", value)
+	}
+	return stringPayload
 }
