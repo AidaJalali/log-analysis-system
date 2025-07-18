@@ -70,7 +70,14 @@ go run main.go
   * **Cassandra CQL**: `localhost:9042`
   * **ClickHouse HTTP**: `http://localhost:8123`
   * **ClickHouse Native**: `localhost:9000`
-
+  * **KAFKA_TOPIC**: `logs`
+  * **CLICKHOUSE_HOST**: `localhost`
+  * **CLICKHOUSE_PORT**: `9000`
+  * **CLICKHOUSE_DATABASE**: `default`
+  * **CLICKHOUSE_USER**: `user`
+  * **CLICKHOUSE_PASSWORD**: `password`
+  * **CASSANDRA_KEYSPACE**: `log_system`
+  * **CASSANDRA_HOSTS**: `127.0.0.1:9042`
 -----
 
 ## Database Schemas & Setup
@@ -103,46 +110,19 @@ go run main.go
 
 ### ClickHouse Setup
 
-1.  Connect to the ClickHouse client:
+Connect to the ClickHouse and create tables:
     ```sh
-    docker exec -it clickhouse-server clickhouse-client --user user --password password
-    ```
-2.  Create the database and table:
-    ```sql
-    CREATE DATABASE IF NOT EXISTS log_data;
-
-    CREATE TABLE logs_index (
-        project_id UUID,
-        log_id UUID,
-        event_name String,
-        timestamp DateTime,
-        searchable_key String
-    ) ENGINE = MergeTree()
-    PARTITION BY toYYYYMM(timestamp)
-    ORDER BY (project_id, event_name, timestamp);
+    docker exec -it click_house /usr/bin/clickhouse-client -q "CREATE TABLE IF NOT EXISTS default.logs_index (project_id UUID, log_id UUID, event_name String, timestamp DateTime, searchable_key_1 String) ENGINE = MergeTree() PARTITION BY toYYYYMM(timestamp) ORDER BY (project_id, event_name, timestamp);"
     ```
 
 ### Cassandra Setup
 
-1.  Connect to the Cassandra client (CQL shell):
+Connect to the Cassandra client and create required tables:
     ```sh
-    docker exec -it cassandra cqlsh
+    docker exec -it cassandra cqlsh -e "CREATE KEYSPACE log_system WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};"
+    docker exec -it cassandra cqlsh -e "CREATE TABLE log_system.logs (project_id uuid, log_id uuid, event_name text, timestamp timestamp, payload map<text, text>, PRIMARY KEY (project_id, log_id));"
+
     ```
-2.  Create the keyspace and table:
-    ```sql
-    CREATE KEYSPACE log_system WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
-
-    USE log_system;
-
-    CREATE TABLE logs (
-    project_id uuid,
-    log_id uuid,
-    event_name text,
-    timestamp timestamp
-    payload map<text, timestamp>,
-    PRIMARY KEY (project_id, log_id)
-    );
-
 -----
 
 ## Stopping the System
