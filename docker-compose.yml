@@ -21,13 +21,24 @@ services:
     depends_on:
       - zookeeper
     environment:
-      # --- Existing variables ---
       - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
       - ALLOW_PLAINTEXT_LISTENER=yes
-      # --- Add these two required variables ---
-      - KAFKA_CFG_PROCESS_ROLES=broker  # Tells Kafka to run as a broker and use Zookeeper
-      - KAFKA_CFG_NODE_ID=1            # Gives the broker a unique ID
+      - KAFKA_CFG_PROCESS_ROLES=broker
+      - KAFKA_CFG_NODE_ID=1
+
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:25.6-alpine
+    ports:
+      - "8123:8123" # HTTP interface
+      - "9000:9000" # Native client
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      - CLICKHOUSE_DB=default_db
+      - CLICKHOUSE_USER=user
+      - CLICKHOUSE_PASSWORD=password
 
 volumes:
   cockroach-data:
+  clickhouse-data:
