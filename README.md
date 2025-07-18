@@ -1,80 +1,151 @@
+
+
 # Log Analysis System
 
-This project is a Go application for log analysis.
+This project is a Go application for real-time log analysis, using Kafka for message queuing, **ClickHouse** and **Cassandra** for durable log storage, and **CockroachDB** for metadata.
 
-## Getting Started
-
-**Run the application:**
-   ```sh
-   go run main.go
-   ```
-
-## Project Structure
-- `go.mod` - Go module definition
-- `main.go` - Application entry point (to be created)
+-----
 
 ## Requirements
-- Go 1.18 or newer
 
----
+  * Go `1.18` or newer
+  * Docker and Docker Compose
 
+-----
 
-### cockraoch docker image tag 
-cockroachdb/cockroach:latest-v23.2
+## Setup & Running the System
 
+This project uses `docker-compose.yml` to run all services. For reproducibility, it's configured with the following specific versions:
 
+  * **CockroachDB**: `v24.1.4`
+  * **ZooKeeper**: `3.9.2`
+  * **Kafka**: `3.8.0`
+  * **Cassandra**: `4.1`
+  * **ClickHouse**: `25.6-alpine`
 
-###Cockrocach DB models
+Follow these steps to get the entire system running.
 
-commands:
+**1. Start All Services**
 
-cockroach sql --insecure
-
-create database log;
-use log;
-
-```sql
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username STRING UNIQUE NOT NULL,
-    password_hash STRING NOT NULL
-);
-CREATE TABLE projects (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name STRING NOT NULL,
-    api_key STRING UNIQUE NOT NULL,
-    log_ttl_seconds INT NOT NULL,
-    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
-);
-CREATE TABLE user_projects (
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, project_id)
-);
-CREATE TABLE project_searchable_keys (
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    key_name STRING NOT NULL,
-    PRIMARY KEY (project_id, key_name)
-);
-
-
-Feel free to update this README as the project evolves.
-
-## Running CockroachDB with Docker Compose
-
-This project includes a `docker-compose.yml` file to run CockroachDB for development and testing.
-
-To start CockroachDB:
+Run the following command from the root of the project to start all databases and Kafka in the background.
 
 ```sh
-docker-compose up -d
+docker compose up -d
 ```
 
-- The database will be available on port 26257 (SQL) and 8080 (web UI).
-- Data is stored in a 500MB tmpfs volume for persistence during container runtime.
+**2. Create the Kafka `logs` Topic**
 
-To stop and remove the container:
+Once the containers are running, execute this command to create the necessary Kafka topic.
 
 ```sh
-docker-compose down
+docker exec -it kafka kafka-topics.sh --create --topic logs --bootstrap-server localhost:9092
+```
+
+**3. Set Up Database Schemas**
+
+You need to connect to each database to create the required tables. Follow the instructions in the **Database Schemas & Setup** section below.
+
+**4. Set Environment Variables**
+
+Before running the application, you must set environment variables so the Go program knows how to connect to the other services.
+
+
+
+
+
+**5. Run the Go Application**
+
+Finally, run the main application.
+
+```sh
+go run main.go
+```
+
+-----
+
+## Service Endpoints
+
+  * **CockroachDB SQL**: `localhost:26257`
+  * **Kafka Broker**: `localhost:9092`
+  * **Cassandra CQL**: `localhost:9042`
+  * **ClickHouse HTTP**: `http://localhost:8123`
+  * **ClickHouse Native**: `localhost:9000`
+
+-----
+
+## Database Schemas & Setup
+
+### CockroachDB Setup
+
+1.  Connect to the database:
+    ```sh
+    cockroach sql --insecure --host=localhost:26257
+    ```
+2.  Create the database and tables:
+    ```sql
+    CREATE DATABASE log;
+    USE log;
+
+    CREATE TABLE users (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        username STRING UNIQUE NOT NULL,
+        password_hash STRING NOT NULL
+    );
+
+    CREATE TABLE projects (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name STRING NOT NULL,
+        api_key STRING UNIQUE NOT NULL,
+        log_ttl_seconds INT NOT NULL,
+        owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+    );
+    ```
+
+### ClickHouse Setup
+
+1.  Connect to the ClickHouse client:
+    ```sh
+    docker exec -it clickhouse-server clickhouse-client --user user --password password
+    ```
+2.  Create the database and table:
+    ```sql
+    CREATE DATABASE IF NOT EXISTS log_data;
+
+    CREATE TABLE log_data.logs_index (
+        project_id UUID,
+        log_id UUID,
+        event_name String,
+        timestamp DateTime,
+        searchable_key String
+    ) ENGINE = MergeTree()
+    PARTITION BY toYYYYMM(timestamp)
+    ORDER BY (project_id, event_name, timestamp);
+    ```
+
+### Cassandra Setup
+
+1.  Connect to the Cassandra client (CQL shell):
+    ```sh
+    docker exec -it cassandra cqlsh
+    ```
+2.  Create the keyspace and table:
+    ```sql
+    CREATE KEYSPACE log_data WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+
+    CREATE TABLE logs (
+    project_id uuid,
+    log_id uuid,
+    event_name text,
+    payload map<text, timestamp>,
+    PRIMARY KEY (project_id, log_id)
+    );
+
+-----
+
+## Stopping the System
+
+To stop and remove all containers, networks, and volumes:
+
+```sh
+docker compose down --volumes
 ```
