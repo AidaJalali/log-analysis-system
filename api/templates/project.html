@@ -60,36 +60,22 @@
         {{else}}
         <div class="mt-8">
             <h2 class="text-xl font-semibold mb-4">Logs</h2>
-            <table class="min-w-full bg-white border rounded shadow">
+            <table id="logs-table" class="min-w-full bg-white border rounded shadow">
                 <thead>
                     <tr>
+                        <th class="px-4 py-2 border-b">Log ID</th>
                         <th class="px-4 py-2 border-b">Event Name</th>
                         <th class="px-4 py-2 border-b">Timestamp</th>
-                        <th class="px-4 py-2 border-b">Payload</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {{range .Logs}}
+                <tbody id="logs-tbody">
                     <tr>
-                        <td class="px-4 py-2 border-b">{{.EventName}}</td>
-                        <td class="px-4 py-2 border-b">{{.Timestamp}}</td>
-                        <td class="px-4 py-2 border-b font-mono text-xs">{{.Payload}}</td>
+                        <td colspan="3" class="text-center text-gray-400 py-4">Loading logs...</td>
                     </tr>
-                    {{else}}
-                    <tr>
-                        <td colspan="3" class="text-center text-gray-400 py-4">No logs found for this project.</td>
-                    </tr>
-                    {{end}}
                 </tbody>
             </table>
             <div class="flex justify-center mt-4 space-x-2">
-                {{if gt .Page 1}}
-                <a href="?page={{.PrevPage}}" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Previous</a>
-                {{end}}
-                <span class="px-3 py-1">Page {{.Page}} of {{.TotalPages}}</span>
-                {{if lt .Page .TotalPages}}
-                <a href="?page={{.NextPage}}" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">Next</a>
-                {{end}}
+                <!-- Pagination can be added here if needed -->
             </div>
         </div>
         {{end}}
@@ -127,6 +113,36 @@
                 alert('An error occurred while sending the log.');
             });
         }
+    </script>
+    <script>
+        const projectId = "{{.ProjectID}}";
+        function fetchLogs() {
+            fetch(`/api/projects/${projectId}/logs`)
+                .then(resp => resp.json())
+                .then(logs => {
+                    const tbody = document.getElementById('logs-tbody');
+                    tbody.innerHTML = '';
+                    if (logs.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="3" class="text-center text-gray-400 py-4">No logs found for this project.</td></tr>`;
+                        return;
+                    }
+                    logs.forEach(log => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td class="px-4 py-2 border-b font-mono text-xs">${log.log_id}</td>
+                            <td class="px-4 py-2 border-b">${log.event_name}</td>
+                            <td class="px-4 py-2 border-b">${new Date(log.timestamp * 1000).toLocaleString()}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                })
+                .catch(() => {
+                    const tbody = document.getElementById('logs-tbody');
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-center text-gray-400 py-4">Failed to load logs.</td></tr>`;
+                });
+        }
+        fetchLogs();
+        setInterval(fetchLogs, 3000); // Poll every 3 seconds
     </script>
 </body>
 </html>

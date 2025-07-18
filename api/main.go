@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -20,11 +20,12 @@ import (
 	"io/ioutil"
 	"os/exec"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/gorilla/mux"
+	_ "github.com/lib/pq"
+	"github.com/segmentio/kafka-go"
 	"github.com/yuin/goldmark"
 	"golang.org/x/crypto/bcrypt"
-	"github.com/segmentio/kafka-go"
-	_"github.com/lib/pq"
 )
 
 var db *sql.DB
@@ -44,7 +45,7 @@ func initDB() error {
 	return db.Ping()
 }
 
-var kafkaWriter *kafka.Writer 
+var kafkaWriter *kafka.Writer
 
 func initKafka() error {
 	kafkaBrokers := os.Getenv("KAFKA_BROKERS")
@@ -60,7 +61,41 @@ func initKafka() error {
 	return nil
 }
 
+// ClickHouse client struct for API
+var clickhouseConn clickhouse.Conn
 
+func initClickHouse() error {
+	// These values should ideally come from environment variables or config
+	addr := os.Getenv("CLICKHOUSE_ADDR")
+	if addr == "" {
+		addr = "localhost:9000"
+	}
+	username := os.Getenv("CLICKHOUSE_USER")
+	if username == "" {
+		username = "default"
+	}
+	password := os.Getenv("CLICKHOUSE_PASSWORD")
+	database := os.Getenv("CLICKHOUSE_DB")
+	if database == "" {
+		database = "default"
+	}
+	conn, err := clickhouse.Open(&clickhouse.Options{
+		Addr: []string{addr},
+		Auth: clickhouse.Auth{
+			Database: database,
+			Username: username,
+			Password: password,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if err := conn.Ping(context.Background()); err != nil {
+		return err
+	}
+	clickhouseConn = conn
+	return nil
+}
 
 func main() {
 
@@ -69,11 +104,16 @@ func main() {
 	}
 	fmt.Println("Connected to database successfully!")
 
-
 	if err := initKafka(); err != nil {
 		panic("Failed to connect to Kafka: " + err.Error())
 	}
 	fmt.Println("Connected to Kafka successfully!")
+
+	// Initialize ClickHouse
+	if err := initClickHouse(); err != nil {
+		panic("Failed to connect to ClickHouse: " + err.Error())
+	}
+	fmt.Println("Connected to ClickHouse successfully!")
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", homeHandler)
@@ -84,6 +124,7 @@ func main() {
 	r.HandleFunc("/dashboard/{projectID}", projectHandler).Methods("GET")
 	r.HandleFunc("/projects/create", createProjectHandler)
 	r.HandleFunc("/api/projects/{projectID}/logs", apiLogHandler).Methods("POST")
+	r.HandleFunc("/api/projects/{projectID}/logs", apiProjectLogsHandler).Methods("GET")
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
 	port := ":8080"
@@ -454,4 +495,39 @@ func apiLogHandler(w http.ResponseWriter, r *http.Request) {
 	// Respond with 202 Accepted
 	w.WriteHeader(http.StatusAccepted)
 	w.Write([]byte(`{"status":"accepted"}`))
+}
+
+// Add struct for log response
+
+type ClickHouseLog struct {
+	LogID     string `json:"log_id"`
+	EventName string `json:"event_name"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// Handler to fetch logs from ClickHouse
+func apiProjectLogsHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectID := vars["projectID"]
+	ctx := context.Background()
+
+	query := `SELECT log_id, event_name, timestamp FROM logs_index WHERE project_id = ? ORDER BY timestamp DESC LIMIT 100`
+	rows, err := clickhouseConn.Query(ctx, query, projectID)
+	if err != nil {
+		http.Error(w, "Failed to query ClickHouse", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	logs := []ClickHouseLog{}
+	for rows.Next() {
+		var l ClickHouseLog
+		if err := rows.Scan(&l.LogID, &l.EventName, &l.Timestamp); err != nil {
+			continue
+		}
+		logs = append(logs, l)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
 }
