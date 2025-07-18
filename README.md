@@ -1,48 +1,61 @@
 
+
 # Log Analysis System
 
-This project is a Go application for real-time log analysis, using Kafka for message queuing, **ClickHouse for log storage**, and CockroachDB for metadata.
+This project is a Go application for real-time log analysis, using Kafka for message queuing, **ClickHouse** and **Cassandra** for durable log storage, and **CockroachDB** for metadata.
 
----
+-----
 
 ## Requirements
 
-* Go `1.18` or newer
-* Docker and Docker Compose
+  * Go `1.18` or newer
+  * Docker and Docker Compose
 
----
+-----
 
 ## Setup & Running the System
 
-This project uses a `docker-compose.yml` file to run all required services. The file is configured with the following service versions:
+This project uses `docker-compose.yml` to run all services. For reproducibility, it's configured with the following specific versions:
 
-* **CockroachDB**: `v24.1.4`
-* **ZooKeeper**: `3.9.2`
-* **Kafka**: `3.8.0`
-* **ClickHouse**: `25.6-alpine`
+  * **CockroachDB**: `v24.1.4`
+  * **ZooKeeper**: `3.9.2`
+  * **Kafka**: `3.8.0`
+  * **Cassandra**: `4.1`
+  * **ClickHouse**: `25.6-alpine`
 
-**1. Start all services:**
+Follow these steps to get the entire system running.
 
-Run the following command from the root of the project:
+**1. Start All Services**
+
+Run the following command from the root of the project to start all databases and Kafka in the background.
+
 ```sh
 docker compose up -d
-````
+```
 
-**2. Create the Kafka `logs` Topic:**
+**2. Create the Kafka `logs` Topic**
 
-Once the containers are running, execute the command below to create the necessary Kafka topic.
+Once the containers are running, execute this command to create the necessary Kafka topic.
 
 ```sh
 docker exec -it kafka kafka-topics.sh --create --topic logs --bootstrap-server localhost:9092
 ```
 
-**3. Install Go Dependencies:**
+**3. Set Up Database Schemas**
 
-```sh
-go get "[github.com/ClickHouse/clickhouse-go/v2](https://github.com/ClickHouse/clickhouse-go/v2)"
-```
+You need to connect to each database to create the required tables. Follow the instructions in the **Database Schemas & Setup** section below.
 
-**4. Run the Go Application:**
+**4. Set Environment Variables**
+
+Before running the application, you must set environment variables so the Go program knows how to connect to the other services.
+
+
+
+
+
+**5. Run the Go Application**
+
+Finally, run the main application.
 
 ```sh
 go run main.go
@@ -52,11 +65,11 @@ go run main.go
 
 ## Service Endpoints
 
-  * **CockroachDB UI**: `http://localhost:26257` (The UI is on the same port as SQL in recent versions)
   * **CockroachDB SQL**: `localhost:26257`
   * **Kafka Broker**: `localhost:9092`
+  * **Cassandra CQL**: `localhost:9042`
   * **ClickHouse HTTP**: `http://localhost:8123`
-  * **ClickHouse Native Client**: `localhost:9000`
+  * **ClickHouse Native**: `localhost:9000`
 
 -----
 
@@ -90,28 +103,42 @@ go run main.go
 
 ### ClickHouse Setup
 
-1.  Connect to the ClickHouse container's client:
+1.  Connect to the ClickHouse client:
     ```sh
     docker exec -it clickhouse-server clickhouse-client --user user --password password
     ```
-2.  Create the table for storing the log index in the `default_db`:
+2.  Create the database and table:
     ```sql
--- Create a new database specifically for log data
-CREATE DATABASE IF NOT EXISTS log_data;
+    CREATE DATABASE IF NOT EXISTS log_data;
 
--- Switch to the new database
-USE log_data;
+    CREATE TABLE log_data.logs_index (
+        project_id UUID,
+        log_id UUID,
+        event_name String,
+        timestamp DateTime,
+        searchable_key String
+    ) ENGINE = MergeTree()
+    PARTITION BY toYYYYMM(timestamp)
+    ORDER BY (project_id, event_name, timestamp);
+    ```
 
--- Create the table
-CREATE TABLE logs_index (
-    project_id UUID,
-    log_id UUID,
-    event_name String,
-    timestamp DateTime,
-    searchable_key String
-) ENGINE = MergeTree()
-PARTITION BY toYYYYMM(timestamp)
-ORDER BY (project_id, event_name, timestamp);
+### Cassandra Setup
+
+1.  Connect to the Cassandra client (CQL shell):
+    ```sh
+    docker exec -it cassandra cqlsh
+    ```
+2.  Create the keyspace and table:
+    ```sql
+    CREATE KEYSPACE log_data WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+
+    CREATE TABLE logs (
+    project_id uuid,
+    log_id uuid,
+    event_name text,
+    payload map<text, timestamp>,
+    PRIMARY KEY (project_id, log_id)
+    );
 
 -----
 
@@ -121,7 +148,4 @@ To stop and remove all containers, networks, and volumes:
 
 ```sh
 docker compose down --volumes
-```
-
-```
 ```
