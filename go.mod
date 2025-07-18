@@ -23,6 +23,7 @@ require (
 	github.com/paulmach/orb v0.11.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
+	github.com/segmentio/kafka-go v0.4.48 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/yuin/goldmark v1.7.12 // indirect
 	go.opentelemetry.io/otel v1.36.0 // indirect

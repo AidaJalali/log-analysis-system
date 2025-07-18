@@ -1,8 +1,10 @@
 package database
 
 import (
-	"log-analysis-system/consumer/config"
+	"log"
+	"time"
 
+	"log-analysis-system/consumer/config"
 	"github.com/gocql/gocql"
 )
 
@@ -32,10 +34,28 @@ func NewCassandraClient(cfg config.CassandraConfig)(*CassandraClient,error){
 	}
 
 	session, err := cluster.CreateSession()
-	
+
 	if err != nil {
 		return nil, err
 	}
 	return &CassandraClient{Session: session},nil
+}
+
+func (c *CassandraClient) WriteLog(logData LogPayload) error {
+	err := c.Session.Query(`
+		INSERT INTO logs (project_id, log_id, event_name, timestamp, payload) VALUES (?, ?, ?, ?, ?)
+	`,
+		logData.ProjectID,
+		logData.LogID,
+		logData.EventName,
+		time.Unix(logData.Timestamp, 0),
+		logData.Payload,
+	).Exec()
+
+	if err != nil {
+		log.Printf("ERROR: Failed to write to Cassandra: %v", err)
+		return err
+	}
+	return nil
 }
 
