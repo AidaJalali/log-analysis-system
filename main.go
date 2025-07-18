@@ -15,8 +15,11 @@ import (
 
 	"log"
 
+	"encoding/json"
+	"io/ioutil"
+	"os/exec"
+
 	"github.com/gorilla/mux"
-	_ "github.com/lib/pq"
 	"github.com/yuin/goldmark"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -53,6 +56,7 @@ func main() {
 	r.HandleFunc("/dashboard", dashboardHandler).Methods("GET")
 	r.HandleFunc("/dashboard/{projectID}", projectHandler).Methods("GET")
 	r.HandleFunc("/projects/create", createProjectHandler)
+	r.HandleFunc("/api/projects/{projectID}/logs", apiLogHandler).Methods("POST")
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
 	port := ":8080"
@@ -204,9 +208,79 @@ func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 func projectHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	projectID := vars["projectID"]
-	// TODO: Add project-specific logic and data fetching here
+	// Fetch project details
+	var name, apiKey string
+	var keys []string
+	row := db.QueryRow(`SELECT name, api_key FROM projects WHERE id = $1`, projectID)
+	err := row.Scan(&name, &apiKey)
+	if err != nil {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+	rows, err := db.Query(`SELECT key_name FROM project_searchable_keys WHERE project_id = $1`, projectID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err == nil {
+				keys = append(keys, key)
+			}
+		}
+	}
+	// Pagination
+	page := 1
+	perPage := 20
+	if p := r.URL.Query().Get("page"); p != "" {
+		fmt.Sscanf(p, "%d", &page)
+		if page < 1 {
+			page = 1
+		}
+	}
+	offset := (page - 1) * perPage
+	// Fetch logs for this project
+	logRows, err := db.Query(`SELECT id, event_name, timestamp, payload FROM logs WHERE project_id = $1 ORDER BY timestamp DESC LIMIT $2 OFFSET $3`, projectID, perPage, offset)
+	logs := []map[string]interface{}{}
+	if err == nil {
+		defer logRows.Close()
+		for logRows.Next() {
+			var id, eventName, payload string
+			var timestamp int64
+			if err := logRows.Scan(&id, &eventName, &timestamp, &payload); err == nil {
+				logs = append(logs, map[string]interface{}{
+					"ID":        id,
+					"EventName": eventName,
+					"Timestamp": timestamp,
+					"Payload":   payload,
+				})
+			}
+		}
+	}
+	// Count total logs for pagination
+	totalLogs := 0
+	db.QueryRow(`SELECT count(*) FROM logs WHERE project_id = $1`, projectID).Scan(&totalLogs)
+	totalPages := (totalLogs + perPage - 1) / perPage
+	loading := r.URL.Query().Get("loading") == "1"
+	prevPage := page - 1
+	if prevPage < 1 {
+		prevPage = 1
+	}
+	nextPage := page + 1
+	if nextPage > totalPages {
+		nextPage = totalPages
+	}
 	tmpl := template.Must(template.ParseFiles("templates/project.html"))
-	tmpl.Execute(w, map[string]interface{}{"ProjectID": projectID})
+	tmpl.Execute(w, map[string]interface{}{
+		"ProjectID":      projectID,
+		"ProjectName":    name,
+		"ApiKey":         apiKey,
+		"SearchableKeys": strings.Join(keys, ", "),
+		"Logs":           logs,
+		"Page":           page,
+		"TotalPages":     totalPages,
+		"PrevPage":       prevPage,
+		"NextPage":       nextPage,
+		"Loading":        loading,
+	})
 }
 
 func createProjectHandler(w http.ResponseWriter, r *http.Request) {
@@ -237,11 +311,11 @@ func createProjectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apiKey := hex.EncodeToString(apiKeyBytes)
-	var projectID string
-	err = db.QueryRow(
-		`INSERT INTO projects (name, api_key, log_ttl_seconds, owner_id) VALUES ($1, $2, $3, $4) RETURNING id`,
-		projectName, apiKey, ttl, userID,
-	).Scan(&projectID)
+	projectID := apiKey // Set project id and api key to the same value
+	_, err = db.Exec(
+		`INSERT INTO projects (id, name, api_key, log_ttl_seconds, owner_id) VALUES ($1, $2, $3, $4, $5)`,
+		projectID, projectName, apiKey, ttl, userID,
+	)
 	if err != nil {
 		log.Printf("createProjectHandler: error inserting project: %v", err)
 		http.Error(w, "Failed to create project", http.StatusInternalServerError)
@@ -261,5 +335,84 @@ func createProjectHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("createProjectHandler: error inserting searchable key '%s': %v", key, err)
 		}
 	}
+	// Update generate-log.sh with the new API key, project ID, and correct API_URL_BASE, then run it for this project
+	go func(apiKey, projectID string) {
+		content, err := ioutil.ReadFile("generate-log.sh")
+		if err != nil {
+			log.Printf("generate-log.sh read error: %v", err)
+			return
+		}
+		lines := strings.Split(string(content), "\n")
+		for i, line := range lines {
+			if strings.HasPrefix(line, "API_URL_BASE=") {
+				lines[i] = "API_URL_BASE=\"http://localhost:8080/api/projects\""
+			}
+			if strings.HasPrefix(line, "API_KEY=") {
+				lines[i] = "API_KEY=" + apiKey
+			}
+			if strings.HasPrefix(line, "PROJECT_IDS=(") {
+				lines[i] = fmt.Sprintf("PROJECT_IDS=(%s)", projectID)
+			}
+		}
+		newContent := strings.Join(lines, "\n")
+		err = ioutil.WriteFile("generate-log.sh", []byte(newContent), 0755)
+		if err != nil {
+			log.Printf("generate-log.sh write error: %v", err)
+			return
+		}
+		cmd := exec.Command("/bin/bash", "generate-log.sh")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("generate-log.sh exec error: %v, output: %s", err, string(out))
+		} else {
+			log.Printf("generate-log.sh executed successfully: %s", string(out))
+		}
+	}(apiKey, projectID)
+
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
+// API handler for log ingestion
+func apiLogHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	projectID := vars["projectID"]
+	apiKey := r.Header.Get("X-API-KEY")
+	if apiKey == "" {
+		http.Error(w, "Missing API key", http.StatusUnauthorized)
+		return
+	}
+	// Validate API key for project
+	var dbApiKey string
+	err := db.QueryRow(`SELECT api_key FROM projects WHERE id = $1`, projectID).Scan(&dbApiKey)
+	if err != nil || dbApiKey != apiKey {
+		http.Error(w, "Invalid API key or project", http.StatusUnauthorized)
+		return
+	}
+	// Parse log JSON
+	type LogPayload struct {
+		EventName string                 `json:"event_name"`
+		Timestamp int64                  `json:"timestamp"`
+		Payload   map[string]interface{} `json:"payload"`
+	}
+	var logPayload LogPayload
+	if err := json.NewDecoder(r.Body).Decode(&logPayload); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	payloadBytes, err := json.Marshal(logPayload.Payload)
+	if err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	_, err = db.Exec(
+		`INSERT INTO logs (project_id, event_name, timestamp, payload) VALUES ($1, $2, $3, $4)`,
+		projectID, logPayload.EventName, logPayload.Timestamp, string(payloadBytes),
+	)
+	if err != nil {
+		log.Printf("apiLogHandler: error inserting log: %v", err)
+		http.Error(w, "Failed to insert log", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"status":"ok"}`))
 }
