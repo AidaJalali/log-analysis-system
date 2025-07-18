@@ -20,6 +20,7 @@ import (
 	"os/exec"
 
 	"github.com/gorilla/mux"
+	_ "github.com/lib/pq" // PostgreSQL driver for CockroachDB
 	"github.com/yuin/goldmark"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -413,6 +414,58 @@ func apiLogHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to insert log", http.StatusInternalServerError)
 		return
 	}
+
+	// Send to consumer service via HTTP (in background)
+	go sendToConsumer(projectID, logPayload.EventName, logPayload.Payload)
+
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"status":"ok"}`))
+}
+
+// Function to send log data to consumer service
+func sendToConsumer(projectID, eventName string, payload map[string]interface{}) {
+	consumerURL := os.Getenv("CONSUMER_URL")
+	if consumerURL == "" {
+		consumerURL = "http://localhost:8081" // Default consumer URL
+	}
+
+	// Convert payload to string map for consumer
+	stringPayload := make(map[string]string)
+	for k, v := range payload {
+		if str, ok := v.(string); ok {
+			stringPayload[k] = str
+		} else {
+			// Convert non-string values to JSON string
+			if jsonBytes, err := json.Marshal(v); err == nil {
+				stringPayload[k] = string(jsonBytes)
+			}
+		}
+	}
+
+	// Create message for consumer
+	message := map[string]interface{}{
+		"project_id": projectID,
+		"event_name": eventName,
+		"payload":    stringPayload,
+	}
+
+	messageBytes, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("sendToConsumer: error marshaling message: %v", err)
+		return
+	}
+
+	// Send HTTP POST to consumer
+	resp, err := http.Post(consumerURL+"/logs", "application/json", bytes.NewBuffer(messageBytes))
+	if err != nil {
+		log.Printf("sendToConsumer: error sending to consumer: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		log.Printf("sendToConsumer: successfully sent to consumer for project %s", projectID)
+	} else {
+		log.Printf("sendToConsumer: consumer returned status %d for project %s", resp.StatusCode, projectID)
+	}
 }
